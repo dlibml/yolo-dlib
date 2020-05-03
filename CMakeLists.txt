@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.14)
-project("C++ Project Template" LANGUAGES CXX)
+project("yolo-dlib" LANGUAGES CXX)
 
-set(CPACK_PACKAGE_NAME "cpp-project")
+set(CPACK_PACKAGE_NAME "yolo-dlib")
 set(CPACK_PACKAGE_VERSION_MAJOR "0")
 set(CPACK_PACKAGE_VERSION_MINOR "0")
 set(CPACK_PACKAGE_VERSION_PATCH "0")
@@ -38,9 +38,6 @@ if (CMAKE_BUILD_TYPE STREQUAL "Release")
     endif()
 endif()
 
-# OpenMP support
-find_package(OpenMP)
-
 # OpenCV dependency
 find_package(OpenCV REQUIRED)
 
@@ -53,14 +50,14 @@ FetchContent_Declare(
     dlib
     GIT_REPOSITORY https://github.com/davisking/dlib.git
     GIT_TAG        ${DLIB_TAG}
-    SOURCE_DIR     ${PROJECT_SOURCE_DIR}/external
+    SOURCE_DIR     ${PROJECT_SOURCE_DIR}/external/dlib
 )
 
 message("-- Fetching dlib ${DLIB_TAG}")
 FetchContent_MakeAvailable(dlib)
 
 add_executable(main src/main.cpp)
-target_link_libraries(main PRIVATE dlib::dlib OpenMP::OpenMP_CXX ${OpenCV_LIBS})
+target_link_libraries(main PRIVATE dlib::dlib ${OpenCV_LIBS})
 target_include_directories(main PRIVATE src ${OpenCV_INCLUDE_DIRS})
 target_compile_options(main PRIVATE -Wall -Wextra -pedantic -Wno-deprecated-copy)
 install(TARGETS main DESTINATION bin)
