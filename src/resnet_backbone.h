@@ -1,13 +1,13 @@
-#ifndef ResNet_H
-#define ResNet_H
+#ifndef ResNet_Backbone_H
+#define ResNet_Backbone_H
 
 #include <dlib/dnn.h>
 
-namespace resnet
+namespace resnet_backbone
 {
     using namespace dlib;
     // BN is bn_con or affine layer
-    template<template<typename> class BN>
+    template<template<typename> class BN, template <typename> class ACT>
     struct def
     {
         // A convolution with custom padding
@@ -21,13 +21,13 @@ namespace resnet
         // The ResNet basic block
         template<long num_filters, int stride, typename SUBNET>
         using basicblock = BN<conp<num_filters, 3, 1, 1,
-            relu<BN<conp<num_filters, 3, stride, 1, SUBNET>>>>>;
+            ACT<BN<conp<num_filters, 3, stride, 1, SUBNET>>>>>;
 
         // The ResNet bottleneck block
         template<long num_filters, int stride, typename SUBNET>
         using bottleneck = BN<conp<4 * num_filters, 1, 1, 0,
-                relu<BN<conp<num_filters, 3, stride, 1,
-                relu<BN<conp<num_filters, 1, 1, 0, SUBNET>>>>>>>>;
+                ACT<BN<conp<num_filters, 3, stride, 1,
+                ACT<BN<conp<num_filters, 1, 1, 0, SUBNET>>>>>>>>;
 
         // The ResNet residual, where BLOCK is either basicblock or bottleneck
         template<template<long, int, typename> class BLOCK, long num_filters, typename SUBNET>
@@ -46,7 +46,7 @@ namespace resnet
             long num_filters,
             typename SUBNET
         >
-        using residual_block = relu<RESIDUAL<BLOCK, num_filters, SUBNET>>;
+        using residual_block = ACT<RESIDUAL<BLOCK, num_filters, SUBNET>>;
 
         template<long num_filters, typename SUBNET>
         using resbasicblock_down = residual_block<residual_down, basicblock, num_filters, SUBNET>;
@@ -65,7 +65,7 @@ namespace resnet
 
         // Common processing for standard resnet inputs
         template<typename INPUT>
-        using input_processing = max_poolp<3, 2, 1, relu<BN<conp<64, 7, 2, 3, INPUT>>>>;
+        using input_processing = max_poolp<3, 2, 1, ACT<BN<conp<64, 7, 2, 3, INPUT>>>>;
 
         // The ResNet backbone with basicblocks
         template<long nb_512, long nb_256, long nb_128, long nb_64, typename INPUT>
@@ -98,17 +98,17 @@ namespace resnet
         using n152 = loss_multiclass_log<fc<1000, avg_pool_everything<backbone_152<input_rgb_image>>>>;
     };
 
-    using train_18 = def<bn_con>::n18;
-    using train_34 = def<bn_con>::n34;
-    using train_50 = def<bn_con>::n50;
-    using train_101 = def<bn_con>::n101;
-    using train_152 = def<bn_con>::n152;
+    using train_18 = def<bn_con, relu>::n18;
+    using train_34 = def<bn_con, relu>::n34;
+    using train_50 = def<bn_con, mish>::n50;
+    using train_101 = def<bn_con, relu>::n101;
+    using train_152 = def<bn_con, relu>::n152;
 
-    using infer_18 = def<affine>::n18;
-    using infer_34 = def<affine>::n34;
-    using infer_50 = def<affine>::n50;
-    using infer_101 = def<affine>::n101;
-    using infer_152 = def<affine>::n152;
+    using infer_18 = def<affine, relu>::n18;
+    using infer_34 = def<affine, relu>::n34;
+    using infer_50 = def<affine, relu>::n50;
+    using infer_101 = def<affine, relu>::n101;
+    using infer_152 = def<affine, relu>::n152;
 }
 
-#endif // ResNet_H
+#endif // ResNet_Backbone_H

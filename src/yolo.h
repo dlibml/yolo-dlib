@@ -18,12 +18,23 @@ namespace dlib
 
         yolo_options() = default;
 
-        yolo_options(const long input_size_, const long downsampling_factor_, const std::vector<std::string>& labels_) :
+        yolo_options(const long input_size_, const long downsampling_factor_, const std::vector<std::vector<mmod_rect>>& boxes) :
             input_size(input_size_),
-            downsampling_factor(downsampling_factor_),
-            labels(labels_)
+            downsampling_factor(downsampling_factor_)
         {
             DLIB_CASSERT(input_size % downsampling_factor == 0, "input_size is not a multiple of downsampling_factor");
+            std::set<std::string> labels_set;
+            for (const auto& v : boxes)
+            {
+                for (const auto& box : v)
+                {
+                    labels_set.insert(box.label);
+                }
+            }
+            for (const auto& label : labels_set)
+            {
+                labels.push_back(label);
+            }
             DLIB_CASSERT(labels.size() > 0, "labels must not be empty");
         }
 
@@ -77,9 +88,13 @@ namespace dlib
                 if (idx < labels.size())
                 {
                     label_map[0](r, c) = 1;
+                    DLIB_CASSERT(0 <= offset_x && offset_x <= 1, "wrong offset_x: " << offset_x);
                     label_map[1](r, c) = offset_x;
+                    DLIB_CASSERT(0 <= offset_y && offset_y <= 1, "wrong offset_y: " << offset_y);
                     label_map[2](r, c) = offset_y;
+                    DLIB_CASSERT(0 <= width && width <= 1, "wrong width: " << width);
                     label_map[3](r, c) = width;
+                    DLIB_CASSERT(0 <= height && height <= 1, "wrong height: " << height);
                     label_map[4](r, c) = height;
                     label_map[5](r, c) = idx;
                 }
@@ -130,12 +145,10 @@ namespace dlib
         deserialize(version, in);
         if (version != 0)
             throw serialization_error("Unexpected version found with deserializing dlib::yolo_options");
-        long input_size, downsampling_factor;
-        std::vector<std::string> labels;
-        deserialize(input_size, in);
-        deserialize(downsampling_factor, in);
-        deserialize(labels, in);
-        item = yolo_options(input_size, downsampling_factor, labels);
+        deserialize(item.input_size, in);
+        deserialize(item.downsampling_factor, in);
+        deserialize(item.labels, in);
+        DLIB_CASSERT(item.input_size % item.downsampling_factor == 0, "input_size is not a multiple of downsampling_factor");
     }
 
     class loss_yolo_
@@ -172,6 +185,7 @@ namespace dlib
 
             for (long i = 0; i < output_tensor.num_samples(); ++i)
             {
+                std::vector<mmod_rect> candidates;
                 for (long r = 0; r < output_tensor.nr(); ++r)
                 {
                     for (long c = 0; c < output_tensor.nc(); ++c)
@@ -204,9 +218,12 @@ namespace dlib
                                                   std::round(center.x() + width / 2 * df),
                                                   std::round(center.y() + height / 2 * df));
                             iter->push_back(rect);
+                            candidates.push_back(rect);
                         }
                     }
                 }
+                // perform NMS
+                // iter->push_back(...);
             }
         }
 
@@ -222,12 +239,14 @@ namespace dlib
         {
             const tensor& output_tensor = sub.get_output();
             tensor& grad = sub.get_gradient_input();
-            resizable_tensor alias_grad;
+            resizable_tensor helper_tensor;
 
             DLIB_CASSERT(sub.sample_expansion_factor() == 1, "expansion factor should be 1");
             DLIB_CASSERT(input_tensor.num_samples() != 0, "we need at least 1 training sample");
             DLIB_CASSERT(input_tensor.num_samples() == grad.num_samples(), "num_samples mismatch");
             DLIB_CASSERT(output_tensor.k() >= 6, "YOLO layer requires at least 6 channels");
+            DLIB_CASSERT(output_tensor.nr() == options.get_grid_size(), "wrong output nr: " << output_tensor.nr());
+            DLIB_CASSERT(output_tensor.nc() == options.get_grid_size(), "wrong output nc: " << output_tensor.nc());
             DLIB_CASSERT(output_tensor.nr() == grad.nr() &&
                          output_tensor.nc() == grad.nc() &&
                          output_tensor.k() == grad.k(), "grad shape mismatch");
@@ -243,17 +262,23 @@ namespace dlib
 
             const float* const out_data = output_tensor.host();
             float* g = grad.host();
+
             // The loss we output is the average loss of over the minibatch and also over each objectness element
             const double scale = 1.0 / (output_tensor.num_samples() * output_tensor.nr() * output_tensor.nc());
+            const double lambda_obj = 1.0;
+            const double lambda_bbr = 100.0;
+            const double lambda_cls = 10.0;
 
+            // --------------------------------------------------------------------------------- //
             // objectness classifier (loss binary log per pixel)
-            alias_tensor obj_tensor(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
+            double loss_obj = 0;
+            alias_tensor obj_alias(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
             const size_t obj_offset = 0;
-            auto aobj = obj_tensor(output_tensor, obj_offset);
-            alias_grad.set_size(obj_tensor.num_samples(), obj_tensor.k(), obj_tensor.nr(), obj_tensor.nc());
-            tt::sigmoid(alias_grad, aobj);
-            double obj_loss = 0;
-            float* ag = alias_grad.host();
+            auto obj_tensor = obj_alias(output_tensor, obj_offset);
+            helper_tensor.copy_size(obj_tensor);
+            tt::sigmoid(helper_tensor, obj_tensor);
+            float* helper_data = helper_tensor.host();
+            // const float* obj_data = obj_tensor.get().host();
             for (long i = 0; i < output_tensor.num_samples(); ++i)
             {
                 for (long r = 0; r < output_tensor.nr(); ++r)
@@ -262,18 +287,21 @@ namespace dlib
                     {
                         const float y = (*truth)[0](r, c);
                         const size_t idx = tensor_index(output_tensor, i, 0, r, c);
-                        const size_t alias_idx = tensor_index(aobj, i, 0, r, c);
+                        const size_t sub_idx= tensor_index(obj_tensor, i, 0, r, c);
+                        // std::cout << "idx: " << idx << ", " << sub_idx<< ", " << y << ": " << out_data[idx] << " == " << obj_data[sub_idx] << '\n';
                         if (y > 0.f)
                         {
                             const float temp = log1pexp(-out_data[idx]);
-                            obj_loss += y * scale * temp;
-                            g[idx] = y * scale * (ag[alias_idx] - 1);
+                            loss_obj += y * temp;
+                            g[idx] = y * scale * (helper_data[sub_idx] - 1);
+                            // std::cout << "y: " << y << ", " << out_data[idx] << ", " << temp << ", " << helper_data[sub_idx] << ", " << g[idx] << '\n';
                         }
                         else if (y < 0.f)
                         {
                             const float temp = -(-out_data[idx] - log1pexp(-out_data[idx]));
-                            obj_loss += -y * temp;
-                            g[idx] = -y * scale * ag[alias_idx];
+                            loss_obj += -y * temp;
+                            g[idx] = -y * scale * helper_data[sub_idx];
+                            // std::cout << "y: " << y << ", " << out_data[idx] << ", " << temp << ", " << helper_data[sub_idx] << ", " << g[idx] << '\n';
                         }
                         else
                         {
@@ -283,28 +311,39 @@ namespace dlib
                 }
             }
 
+            // --------------------------------------------------------------------------------- //
             // bounding box regression (loss mean squared per channel and pixel)
-            alias_tensor bbr_tensor(output_tensor.num_samples(), 4, output_tensor.nr(), output_tensor.nc());
-            double bbr_loss = 0;
+            double loss_bbr = 0;
+            alias_tensor bbr_alias(output_tensor.num_samples(), 4, output_tensor.nr(), output_tensor.nc());
+            size_t bbr_offset = obj_alias.size();
+            auto bbr_tensor = bbr_alias(output_tensor, bbr_offset);
+            helper_tensor.copy_size(bbr_tensor);
+            tt::sigmoid(helper_tensor, bbr_tensor);
+            helper_data = helper_tensor.host();
+            // const float* bbr_data = bbr_tensor.get().host();
             for (long i = 0; i < output_tensor.num_samples(); ++i)
             {
                 for (long r = 0; r < output_tensor.nr(); ++r)
                 {
                     for (long c = 0; c < output_tensor.nc(); ++c)
                     {
-                        for (long k = 0; k < bbr_tensor.k(); ++k)
+                        for (long k = 0; k < bbr_alias.k(); ++k)
                         {
-                            const float y = (*truth)[k](r, c);
+                            const float y = (*truth)[k + 1].operator()(r, c);
+                            const size_t sub_idx = tensor_index(bbr_tensor, i, k, r, c);
                             const size_t idx = tensor_index(output_tensor, i, k + 1, r, c);
+                            // std::cout << "idx: " << idx << ", " << sub_idx<< ", " << y << ": " << out_data[idx] << " == " << bbr_data[sub_idx] << '\n';
+                            // ignore places that don't contain an object
                             if (y == -1)
                             {
                                 g[idx] = 0.f;
                             }
                             else
                             {
-                                const float temp = y - out_data[idx];
-                                bbr_loss += temp * temp;
+                                const float temp = y - helper_data[sub_idx];
+                                loss_bbr += temp * temp;
                                 g[idx] = -scale * temp;
+                                // std::cout << "y+: " << y << ", " << temp << ", " << out_data[idx] << ", " << g[idx] << '\n';
                             }
                         }
                     }
@@ -312,12 +351,13 @@ namespace dlib
             }
 
             // category classifier (loss multiclass log per pixel)
-            alias_tensor cls_tensor(output_tensor.num_samples(), output_tensor.k() - 5, output_tensor.nr(), output_tensor.nc());
-            const size_t cls_offset = obj_tensor.size() + bbr_tensor.size();
-            alias_grad.set_size(cls_tensor.num_samples(), cls_tensor.k(), cls_tensor.nr(), cls_tensor.nc());
-            tt::softmax(alias_grad, cls_tensor(output_tensor, cls_offset));
-            double cls_loss = 0;
-            ag = alias_grad.host();
+            double loss_cls = 0;
+            alias_tensor cls_alias(output_tensor.num_samples(), output_tensor.k() - 5, output_tensor.nr(), output_tensor.nc());
+            const size_t cls_offset = obj_alias.size() + bbr_alias.size();
+            auto cls_tensor = cls_alias(output_tensor, cls_offset);
+            helper_tensor.copy_size(cls_tensor);
+            tt::softmax(helper_tensor, cls_tensor);
+            helper_data = helper_tensor.host();
             for (long i = 0; i < output_tensor.num_samples(); ++i)
             {
                 for (long r = 0; r < output_tensor.nr(); ++r)
@@ -325,37 +365,35 @@ namespace dlib
                     for (long c = 0; c < output_tensor.nc(); ++c)
                     {
                         const float y = (*truth)[5](r, c);
-                        DLIB_CASSERT(static_cast<long>(y) < cls_tensor.k(), "y: " << y << ", output_tensor.k(): " << output_tensor.k());
-                        // if there is no object in this position, we shouldn't update the gradients
-                        if (y == -1)
+                        DLIB_CASSERT(static_cast<long>(y) < cls_alias.k(), "y: " << y << ", cls_tensor.k(): " << cls_alias.k());
+                        for (long k = 0; k < cls_alias.k(); ++k)
                         {
-                            for (long k = 0; k < cls_tensor.k(); ++k)
+                            const size_t sub_idx = tensor_index(cls_tensor, i, k, r, c);
+                            const size_t idx = tensor_index(output_tensor, i, k + 5, r, c);
+                            if (k == y)
                             {
-                                const size_t idx = tensor_index(output_tensor, i, k + 5, r, c);
+                                loss_cls += -safe_log(helper_data[sub_idx]);
+                                g[idx] = scale * (helper_data[sub_idx] - 1);
+                            }
+                            else if (y == -1)
+                            {
                                 g[idx] = 0.f;
                             }
-                        }
-                        else
-                        {
-                            for (long k = 0; k < cls_tensor.k(); ++k)
+                            else
                             {
-                                const size_t alias_idx = tensor_index(cls_tensor(output_tensor, cls_offset), i, k, r, c);
-                                const size_t idx = tensor_index(output_tensor, i, k + 5, r, c);
-                                if (k == y)
-                                {
-                                    cls_loss += -safe_log(ag[alias_idx]);
-                                    g[idx] = scale * (ag[alias_idx] - 1);
-                                }
-                                else
-                                {
-                                    g[idx] = scale * ag[alias_idx];
-                                }
+                                g[idx] = scale * helper_data[sub_idx];
                             }
                         }
                     }
                 }
             }
-            return (obj_loss + bbr_loss + cls_loss) * scale;
+
+            std::cout << "loss_obj: " << loss_obj * lambda_obj * scale;
+            std::cout << ", loss_bbr: " << loss_bbr * lambda_bbr * scale;
+            std::cout << ", loss_cls: " << loss_cls * lambda_cls * scale;
+            std::cout << std::endl;
+            // return loss_obj * lambda_obj;
+            return (loss_obj * lambda_obj + loss_bbr * lambda_bbr + loss_cls * lambda_cls) * scale;
         }
 
         friend void serialize(const loss_yolo_& item, std::ostream& out)
@@ -411,3 +449,4 @@ namespace dlib
 }
 
 #endif // yolo_h_INCLUDED
+

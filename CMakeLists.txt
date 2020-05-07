@@ -53,11 +53,18 @@ FetchContent_Declare(
     SOURCE_DIR     ${PROJECT_SOURCE_DIR}/external/dlib
 )
 
+set(RESNET_INCLUDE_DIR ${PROJECT_SOURCE_DIR}/external/dlib/examples)
+
 message("-- Fetching dlib ${DLIB_TAG}")
 FetchContent_MakeAvailable(dlib)
 
-add_executable(main src/main.cpp)
-target_link_libraries(main PRIVATE dlib::dlib ${OpenCV_LIBS})
-target_include_directories(main PRIVATE src ${OpenCV_INCLUDE_DIRS})
-target_compile_options(main PRIVATE -Wall -Wextra -pedantic -Wno-deprecated-copy)
-install(TARGETS main DESTINATION bin)
+macro(add_dlib_executable name)
+    add_executable(${name} src/${name}.cpp)
+    target_link_libraries(${name} PRIVATE dlib::dlib)
+    target_include_directories(${name} PRIVATE src ${RESNET_INCLUDE_DIR})
+    target_compile_options(${name} PRIVATE -Wall -Wextra -pedantic -Wno-deprecated-copy)
+    install(TARGETS ${name} DESTINATION bin)
+endmacro()
+
+add_dlib_executable(main)
+add_dlib_executable(resnet50_backbone)
