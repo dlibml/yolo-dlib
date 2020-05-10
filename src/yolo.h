@@ -11,14 +11,18 @@ namespace dlib
         //     0: objectness
         //     1: cx
         //     2: cy
-        //     3: width
-        //     4: height
+        //     3: height
+        //     4: width
         //     5: label_idx
         using map_type = std::array<matrix<float, 0, 0>, 6>;
 
         yolo_options() = default;
 
-        yolo_options(const long input_size_, const long downsampling_factor_, const std::vector<std::vector<mmod_rect>>& boxes) :
+        yolo_options(
+            const long input_size_,
+            const long downsampling_factor_,
+            const std::vector<std::vector<mmod_rect>>& boxes
+        ) :
             input_size(input_size_),
             downsampling_factor(downsampling_factor_)
         {
@@ -48,8 +52,56 @@ namespace dlib
 
         const std::vector<std::string>& get_labels() const { return labels; }
 
+        // Resize the input image to a square image and zero-pad the shortest dimension
+        std::pair<double, point> scale_aspect_ratio(
+            const matrix<rgb_pixel>& image,
+            const int size,
+            matrix<rgb_pixel>& square_image
+        )
+        {
+            // figure out if we have to verticallt or horizontally scale the image
+            double ratio = static_cast<double>(image.nr()) / image.nc();
+            double scale = 1.0;
+            if (ratio > 1)
+            {
+                scale = static_cast<double>(size) / image.nr();
+            }
+            else
+            {
+                scale = static_cast<double>(size) / image.nc();
+            }
+
+            // early return if the image has already the requested size
+            if (scale == 1 and ratio == 1)
+            {
+                square_image = image;
+                return {1, point(0, 0)};
+            }
+
+            // black background
+            square_image.set_size(size, size);
+            assign_all_pixels(square_image, dlib::rgb_pixel(0, 0, 0));
+
+            // resize the image so that it fits into a size x size image
+            auto temp = image;
+            resize_image(scale, temp);
+
+            // get the row and column offsets (the padding size)
+            point offset((size - temp.nc()) / 2, (size - temp.nr()) / 2);
+            for (long r = 0; r < temp.nr(); r++)
+            {
+                for (long c = 0; c < temp.nc(); c++)
+                {
+                    square_image(offset.y() + r, offset.x() + c) = temp(r, c);
+                }
+            }
+
+            return {scale, offset};
+        }
+
         // generates a YOLO truth map from an image and its set of bounding boxes
-        std::pair<matrix<rgb_pixel>, map_type> generate_map(
+        std::pair<matrix<rgb_pixel>, map_type> generate_map
+        (
             const matrix<rgb_pixel>& image,
             const std::vector<mmod_rect>& boxes
         )
@@ -61,42 +113,48 @@ namespace dlib
                 m.set_size(grid_size, grid_size);
                 assign_all_pixels(m, -1);
             }
-
             matrix<rgb_pixel> resized_image(input_size, input_size);
-            resize_image(image, resized_image);
-            const auto[rf, cf] = get_row_col_scales(image.nr(), image.nc());
+            const auto[scale, offset] = scale_aspect_ratio(image, input_size, resized_image);
             for (size_t i = 0; i < boxes.size(); ++i)
             {
-                // reshape the bounding box to the resized_image
-                const auto bbox = scale_rectangle(boxes[i].rect, rf, cf);
-                // normalized width of the reshaped bounding box
-                const auto width = bbox.width() / input_size;
-                // normalized height of the reshaped bounding box
-                const auto height = bbox.height() / input_size;
-                // the center of the original bounding box annotation
-                const auto oc = center(boxes[i].rect);
-                // the row in the ouput map
-                const long r = oc.y() / downsampling_factor;
-                // the column in the ouput map
-                const long c = oc.x() / downsampling_factor;
-                // the y offset from the top left corner
-                const double offset_y = static_cast<double>(oc.y()) / downsampling_factor - r;
-                // the x offset from the top left corner
-                const double offset_x = static_cast<double>(oc.x()) / downsampling_factor - c;
-                // the class index
-                const size_t idx = std::find(labels.begin(), labels.end(), boxes[i].label) - labels.begin();
-                if (idx < labels.size())
+                // adjust the bounding box
+                const auto scaled_bbox = scale_rect(boxes[i].rect, scale);
+                auto bbox = translate_rect(scaled_bbox, offset);
+                const rectangle image_rect(0, 0, input_size - 1, input_size - 1);
+                // the center of the adjusted bounding box annotation
+                const auto oc = center(bbox);
+                // only generate maps for boxes whose center is inside of the image
+                if (image_rect.contains(oc))
                 {
-                    label_map[0](r, c) = 1;
-                    DLIB_CASSERT(0 <= offset_x && offset_x <= 1, "wrong offset_x: " << offset_x);
-                    label_map[1](r, c) = offset_x;
-                    DLIB_CASSERT(0 <= offset_y && offset_y <= 1, "wrong offset_y: " << offset_y);
-                    label_map[2](r, c) = offset_y;
-                    DLIB_CASSERT(0 <= width && width <= 1, "wrong width: " << width);
-                    label_map[3](r, c) = width;
-                    DLIB_CASSERT(0 <= height && height <= 1, "wrong height: " << height);
-                    label_map[4](r, c) = height;
-                    label_map[5](r, c) = idx;
+                    // bbox.left() = bbox.left() < 0 ? 0 : bbox.left();
+                    // bbox.top() = bbox.top() < 0 ? 0 : bbox.top();
+                    // bbox.right() = bbox.right() > input_size - 1 ? input_size - 1 :  bbox.right();
+                    // bbox.bottom() = bbox.bottom() > input_size - 1 ? input_size - 1 : bbox.bottom();
+                    // normalized height of the reshaped bounding box
+                    const auto height = static_cast<double>(bbox.height()) / input_size;
+                    // normalized width of the reshaped bounding box
+                    const auto width = static_cast<double>(bbox.width()) / input_size;
+                    // the row in the ouput map
+                    const long r = oc.y() / downsampling_factor;
+                    // the column in the ouput map
+                    const long c = oc.x() / downsampling_factor;
+                    // the y offset from the top left corner
+                    const double offset_y = static_cast<double>(oc.y()) / downsampling_factor - r;
+                    // the x offset from the top left corner
+                    const double offset_x = static_cast<double>(oc.x()) / downsampling_factor - c;
+                    // the class index
+                    const size_t idx = std::find(labels.begin(), labels.end(), boxes[i].label) - labels.begin();
+                    if (idx < labels.size())
+                    {
+                        label_map[0](r, c) = 1;
+                        DLIB_CASSERT(0 <= offset_x && offset_x <= 1, "wrong offset_x: " << offset_x);
+                        label_map[1](r, c) = offset_x;
+                        DLIB_CASSERT(0 <= offset_y && offset_y <= 1, "wrong offset_y: " << offset_y);
+                        label_map[2](r, c) = offset_y;
+                        label_map[3](r, c) = height > 1 ? 1 : height;
+                        label_map[4](r, c) = width > 1 ? 1 : width;
+                        label_map[5](r, c) = idx;
+                    }
                 }
             }
             return std::make_pair(resized_image, label_map);
@@ -195,8 +253,8 @@ namespace dlib
                         {
                             const float offset_x = out_data[tensor_index(output_tensor, i, 1, r, c)];
                             const float offset_y = out_data[tensor_index(output_tensor, i, 2, r, c)];
-                            const float width = out_data[tensor_index(output_tensor, i, 3, r, c)];
-                            const float height = out_data[tensor_index(output_tensor, i, 4, r, c)];
+                            const float height = out_data[tensor_index(output_tensor, i, 3, r, c)];
+                            const float width = out_data[tensor_index(output_tensor, i, 4, r, c)];
                             float max_value = out_data[tensor_index(output_tensor, i, 5, r, c)];
                             size_t label_idx = 0;
                             for (long k = 6; k < output_tensor.k(); ++k)
@@ -266,15 +324,53 @@ namespace dlib
             // The loss we output is the average loss of over the minibatch and also over each objectness element
             const double scale = 1.0 / (output_tensor.num_samples() * output_tensor.nr() * output_tensor.nc());
             const double lambda_obj = 1.0;
-            const double lambda_bbr = 100.0;
-            const double lambda_cls = 10.0;
+            const double lambda_bbr = 5.0;
+            const double lambda_cls = 1.0;
+
+            // extract the subtensors from the output tensor
+            resizable_tensor obj_tensor(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
+            resizable_tensor bbr_tensor(output_tensor.num_samples(), 4, output_tensor.nr(), output_tensor.nc());
+            resizable_tensor cls_tensor(output_tensor.num_samples(), output_tensor.k() - 5, output_tensor.nr(), output_tensor.nc());
+            float* obj_data = obj_tensor.host();
+            float* bbr_data = bbr_tensor.host();
+            float* cls_data = cls_tensor.host();
+
+            int obj_idx = 0, bbr_idx = 0, cls_idx = 0;
+            for (long i = 0; i < output_tensor.num_samples(); ++i)
+            {
+                for (long r = 0; r < output_tensor.nr(); ++r)
+                {
+                    for (long c = 0; c < output_tensor.nc(); ++c)
+                    {
+                        for (long k = 0; k < output_tensor.k(); ++k)
+                        {
+                            const size_t idx = tensor_index(output_tensor, i, k, r, c);
+                            if (k == 0)
+                            {
+                                obj_data[obj_idx++] = out_data[idx];
+                            }
+                            else if (k < 5)
+                            {
+                                bbr_data[bbr_idx++] = out_data[idx];
+                            }
+                            else
+                            {
+                                cls_data[cls_idx++] = out_data[idx];
+                            }
+                        }
+                    }
+                }
+            }
+            obj_tensor.device();
+            bbr_tensor.device();
+            cls_tensor.device();
 
             // --------------------------------------------------------------------------------- //
             // objectness classifier (loss binary log per pixel)
             double loss_obj = 0;
-            alias_tensor obj_alias(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
-            const size_t obj_offset = 0;
-            auto obj_tensor = obj_alias(output_tensor, obj_offset);
+            // alias_tensor obj_alias(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
+            // const size_t obj_offset = 0;
+            // auto obj_tensor = obj_alias(output_tensor, obj_offset);
             helper_tensor.copy_size(obj_tensor);
             tt::sigmoid(helper_tensor, obj_tensor);
             float* helper_data = helper_tensor.host();
@@ -314,9 +410,9 @@ namespace dlib
             // --------------------------------------------------------------------------------- //
             // bounding box regression (loss mean squared per channel and pixel)
             double loss_bbr = 0;
-            alias_tensor bbr_alias(output_tensor.num_samples(), 4, output_tensor.nr(), output_tensor.nc());
-            size_t bbr_offset = obj_alias.size();
-            auto bbr_tensor = bbr_alias(output_tensor, bbr_offset);
+            // alias_tensor bbr_alias(output_tensor.num_samples(), 4, output_tensor.nr(), output_tensor.nc());
+            // size_t bbr_offset = obj_alias.size();
+            // auto bbr_tensor = bbr_alias(output_tensor, bbr_offset);
             helper_tensor.copy_size(bbr_tensor);
             tt::sigmoid(helper_tensor, bbr_tensor);
             helper_data = helper_tensor.host();
@@ -327,7 +423,7 @@ namespace dlib
                 {
                     for (long c = 0; c < output_tensor.nc(); ++c)
                     {
-                        for (long k = 0; k < bbr_alias.k(); ++k)
+                        for (long k = 0; k < bbr_tensor.k(); ++k)
                         {
                             const float y = (*truth)[k + 1].operator()(r, c);
                             const size_t sub_idx = tensor_index(bbr_tensor, i, k, r, c);
@@ -352,9 +448,9 @@ namespace dlib
 
             // category classifier (loss multiclass log per pixel)
             double loss_cls = 0;
-            alias_tensor cls_alias(output_tensor.num_samples(), output_tensor.k() - 5, output_tensor.nr(), output_tensor.nc());
-            const size_t cls_offset = obj_alias.size() + bbr_alias.size();
-            auto cls_tensor = cls_alias(output_tensor, cls_offset);
+            // alias_tensor cls_alias(output_tensor.num_samples(), output_tensor.k() - 5, output_tensor.nr(), output_tensor.nc());
+            // const size_t cls_offset = obj_alias.size() + bbr_alias.size();
+            // auto cls_tensor = cls_alias(output_tensor, cls_offset);
             helper_tensor.copy_size(cls_tensor);
             tt::softmax(helper_tensor, cls_tensor);
             helper_data = helper_tensor.host();
@@ -365,8 +461,8 @@ namespace dlib
                     for (long c = 0; c < output_tensor.nc(); ++c)
                     {
                         const float y = (*truth)[5](r, c);
-                        DLIB_CASSERT(static_cast<long>(y) < cls_alias.k(), "y: " << y << ", cls_tensor.k(): " << cls_alias.k());
-                        for (long k = 0; k < cls_alias.k(); ++k)
+                        DLIB_CASSERT(static_cast<long>(y) < cls_tensor.k(), "y: " << y << ", cls_tensor.k(): " << cls_tensor.k());
+                        for (long k = 0; k < cls_tensor.k(); ++k)
                         {
                             const size_t sub_idx = tensor_index(cls_tensor, i, k, r, c);
                             const size_t idx = tensor_index(output_tensor, i, k + 5, r, c);
@@ -388,11 +484,11 @@ namespace dlib
                 }
             }
 
-            std::cout << "loss_obj: " << loss_obj * lambda_obj * scale;
-            std::cout << ", loss_bbr: " << loss_bbr * lambda_bbr * scale;
-            std::cout << ", loss_cls: " << loss_cls * lambda_cls * scale;
-            std::cout << std::endl;
-            // return loss_obj * lambda_obj;
+            // std::cout << "loss_obj: " << loss_obj * lambda_obj * scale;
+            // std::cout << ", loss_bbr: " << loss_bbr * lambda_bbr * scale;
+            // std::cout << ", loss_cls: " << loss_cls * lambda_cls * scale;
+            // std::cout << std::endl;
+            // return loss_obj * lambda_obj * scale;
             return (loss_obj * lambda_obj + loss_bbr * lambda_bbr + loss_cls * lambda_cls) * scale;
         }
 
