@@ -3,15 +3,19 @@
 
 #include <iostream>
 #include <dlib/data_io.h>
-#include <dlib/gui_widgets.h>
 #include <resnet.h>
+
+#define VISUAL
+#ifdef VISUAL
+#include <dlib/gui_widgets.h>
+#endif
 
 namespace detector
 {
     using namespace dlib;
     template <template <typename> class BN, template <typename> class ACT>
     using net_type = loss_yolo<
-        con<5 + 2, 1, 1, 1, 1,
+        con<1, 1, 1, 1, 1,
         typename resnet_backbone::def<BN, ACT>::template backbone_50<
         input_rgb_image
     >>>;
@@ -30,32 +34,40 @@ struct training_sample
 auto main(/*const int argc, const char** argv*/) -> int
 try
 {
-
     std::vector<dlib::matrix<dlib::rgb_pixel>> images;
     std::vector<std::vector<dlib::mmod_rect>> bboxes;
-    dlib::load_image_dataset(images, bboxes, "./sunglasses.xml");
+    dlib::load_image_dataset(images, bboxes, "./pascal.xml");
     std::cout << "image dataset loaded: " << images.size() << " images\n";
 
     dlib::yolo_options options(608, 32, bboxes);
     detector::train net(options);
+    net.subnet().layer_details().set_num_filters(options.get_labels().size() + 5);
     dlib::deserialize("resnet50_pretrained_backbone.dnn") >> net.subnet().subnet();
     dlib::set_all_learning_rate_multipliers(net.subnet().subnet(), 0.001);
 
-    // dlib::image_window win;
+#ifdef VISUAL
+    dlib::image_window win;
+#endif
 
     dlib::pipe<training_sample> training_data(1000);
+#ifdef VISUAL
+    auto data_loader = [&win, &training_data, &images, &bboxes, &options](time_t seed)
+#else
     auto data_loader = [&training_data, &images, &bboxes, &options](time_t seed)
+#endif
     {
         dlib::rand rnd(time(nullptr) + seed);
 
+        const long min_size = options.get_downsampling_factor() * 1.5;
+        const long chip_dim = options.get_input_size();
         dlib::random_cropper cropper;
         cropper.set_seed(time(nullptr) + seed);
-        cropper.set_chip_dims(608, 608);
+        cropper.set_chip_dims(chip_dim, chip_dim);
         cropper.set_translate_amount(0.1);
         cropper.set_background_crops_fraction(0);
         cropper.set_randomly_flip(true);
         cropper.set_max_rotation_degrees(30);
-        cropper.set_min_object_size(options.get_downsampling_factor(), options.get_downsampling_factor());
+        cropper.set_min_object_size(min_size, min_size);
         cropper.set_max_object_size(0.9);
 
         training_sample sample;
@@ -70,13 +82,17 @@ try
             sample.yolo_map = temp.second;
             dlib::disturb_colors(sample.image, rnd);
 
-            // win.set_image(sample.image);
-            // for (const auto& box : sample.boxes)
-            // {
-            //     win.add_overlay(box.rect, dlib::rgb_pixel(0, 255, 0), box.label);
-            // }
-            // std::cin.get();
-            // win.clear_overlay();
+#ifdef VISUAL
+            win.set_image(sample.image);
+            for (const auto& box : sample.boxes)
+            {
+                win.add_overlay(box.rect, dlib::rgb_pixel(0, 255, 0), box.label);
+            }
+            std::cin.get();
+            win.clear_overlay();
+            win.set_image(options.overlay_map(sample.image, sample.boxes));
+            std::cin.get();
+#endif
 
             training_data.enqueue(sample);
         }
@@ -91,7 +107,7 @@ try
     auto trainer = dlib::dnn_trainer(net);
     trainer.be_verbose();
     trainer.set_learning_rate(0.1);
-    trainer.set_iterations_without_progress_threshold(10000);
+    trainer.set_iterations_without_progress_threshold(5000);
     trainer.set_mini_batch_size(4);
     std::cout << trainer << '\n';
     std::vector<dlib::matrix<dlib::rgb_pixel>> minibatch_images;
