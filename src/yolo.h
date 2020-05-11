@@ -147,8 +147,8 @@ namespace dlib
                         label_map[1](r, c) = offset_x;
                         DLIB_CASSERT(0 <= offset_y && offset_y <= 1, "wrong offset_y: " << offset_y);
                         label_map[2](r, c) = offset_y;
-                        label_map[3](r, c) = height > 1 ? 1 : height;
-                        label_map[4](r, c) = width > 1 ? 1 : width;
+                        label_map[3](r, c) = std::sqrt(height > 1 ? 1 : height);
+                        label_map[4](r, c) = std::sqrt(width > 1 ? 1 : width);
                         label_map[5](r, c) = idx;
                     }
                 }
@@ -184,8 +184,8 @@ namespace dlib
                             }
                         }
                         // bounding boxes
-                        const long h = yolo_map[3](r, c) * input_size;
-                        const long w = yolo_map[4](r, c) * input_size;
+                        const long h = std::pow(yolo_map[3](r, c), 2) * input_size;
+                        const long w = std::pow(yolo_map[4](r, c), 2) * input_size;
                         draw_rectangle(
                             resized_image,
                             rectangle(center.x() - w / 2, center.y() - h / 2, center.x() + w / 2, center.y() + h / 2),
@@ -315,7 +315,7 @@ namespace dlib
                         }
                     }
                 }
-                // perform NMS
+                // TODO: perform NMS
                 // iter->push_back(...);
             }
         }
@@ -357,9 +357,8 @@ namespace dlib
 
             // The loss we output is the average loss of over the minibatch and also over each objectness element
             const double scale = 1.0 / (output_tensor.num_samples() * output_tensor.nr() * output_tensor.nc());
-            const double lambda_obj = 1.0;
-            const double lambda_bbr = 5.0;
-            const double lambda_cls = 1.0;
+            const double lambda_noobj = 0.5;
+            const double lambda_coord = 5.0;
 
             // extract the subtensors from the output tensor
             resizable_tensor obj_tensor(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
@@ -416,7 +415,6 @@ namespace dlib
             tt::softmax(temp_cls_tensor, cls_tensor);
             float* temp_cls_data = temp_cls_tensor.host();
 
-            // const float* obj_data = obj_tensor.get().host();
             for (long i = 0; i < output_tensor.num_samples(); ++i)
             {
                 for (long r = 0; r < output_tensor.nr(); ++r)
@@ -427,18 +425,18 @@ namespace dlib
                         // objectness classifier (loss binary log per pixel)
                         float y = (*truth)[0](r, c);
                         const size_t idx = tensor_index(output_tensor, i, 0, r, c);
-                        const size_t sub_idx= tensor_index(obj_tensor, i, 0, r, c);
+                        obj_idx = tensor_index(obj_tensor, i, 0, r, c);
                         if (y > 0.f)
                         {
                             const float temp = log1pexp(-out_data[idx]);
-                            loss_obj += y * temp;
-                            g[idx] = y * scale * (temp_obj_data[sub_idx] - 1) * lambda_obj;
+                            loss_obj += y * scale * temp;
+                            g[idx] = y * scale * (temp_obj_data[obj_idx] - 1);
                         }
                         else if (y < 0.f)
                         {
                             const float temp = -(-out_data[idx] - log1pexp(-out_data[idx]));
-                            loss_obj += -y * temp;
-                            g[idx] = -y * scale * temp_obj_data[sub_idx] * lambda_obj;
+                            loss_obj += -y * temp * scale * lambda_noobj;
+                            g[idx] = -y * temp_obj_data[obj_idx] * scale * lambda_noobj;
                         }
                         else
                         {
@@ -449,7 +447,7 @@ namespace dlib
                         for (long k = 1; k < 5; ++k)
                         {
                             const float y = (*truth)[k].operator()(r, c);
-                            const size_t sub_idx = tensor_index(bbr_tensor, i, k - 1, r, c);
+                            bbr_idx = tensor_index(bbr_tensor, i, k - 1, r, c);
                             const size_t idx = tensor_index(output_tensor, i, k, r, c);
                             if (y == -1)
                             {
@@ -457,9 +455,10 @@ namespace dlib
                             }
                             else
                             {
-                                const float temp = y - temp_bbr_data[sub_idx];
-                                loss_bbr += temp * temp;
-                                g[idx] = -scale * temp * lambda_bbr;
+                                const float temp1 = y - std::sqrt(temp_bbr_data[bbr_idx]);
+                                const float temp2 = temp1 * scale * lambda_coord;
+                                loss_bbr += temp1 * temp2;
+                                g[idx] = -temp2;
                             }                        }
 
                         // category classifier (loss multiclass log per pixel)
@@ -467,12 +466,12 @@ namespace dlib
                         DLIB_CASSERT(static_cast<long>(y) < cls_tensor.k(), "y: " << y << ", cls_tensor.k(): " << cls_tensor.k());
                         for (long k = 5; k < output_tensor.k(); ++k)
                         {
-                            const size_t sub_idx = tensor_index(cls_tensor, i, k - 5, r, c);
+                            cls_idx = tensor_index(cls_tensor, i, k - 5, r, c);
                             const size_t idx = tensor_index(output_tensor, i, k, r, c);
                             if (k == y)
                             {
-                                loss_cls += -safe_log(temp_cls_data[sub_idx]);
-                                g[idx] = scale * (temp_cls_data[sub_idx] - 1) * lambda_cls;
+                                loss_cls += -safe_log(temp_cls_data[cls_idx]) * scale;
+                                g[idx] = scale * (temp_cls_data[cls_idx] - 1);
                             }
                             else if (y == -1)
                             {
@@ -480,7 +479,7 @@ namespace dlib
                             }
                             else
                             {
-                                g[idx] = scale * temp_cls_data[sub_idx] * lambda_cls;
+                                g[idx] = scale * temp_cls_data[cls_idx];
                             }
                         }
                     }
@@ -492,7 +491,7 @@ namespace dlib
             // std::cout << ", loss_cls: " << loss_cls * lambda_cls * scale;
             // std::cout << std::endl;
             // return loss_obj * lambda_obj * scale;
-            return (loss_obj * lambda_obj + loss_bbr * lambda_bbr + loss_cls * lambda_cls) * scale;
+            return loss_obj + loss_bbr + loss_cls;
         }
 
         friend void serialize(const loss_yolo_& item, std::ostream& out)
