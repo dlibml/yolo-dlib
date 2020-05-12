@@ -5,6 +5,58 @@
 
 namespace dlib
 {
+    // Resize the input image to a square image and zero-pad the shortest dimension
+    std::pair<double, point> scale_aspect_ratio(
+        const matrix<rgb_pixel>& image,
+        const int size,
+        matrix<rgb_pixel>& square_image
+    )
+    {
+        // figure out if we have to verticallt or horizontally scale the image
+        double ratio = static_cast<double>(image.nr()) / image.nc();
+        double scale = 1.0;
+        if (ratio > 1)
+        {
+            scale = static_cast<double>(size) / image.nr();
+        }
+        else
+        {
+            scale = static_cast<double>(size) / image.nc();
+        }
+
+        // early return if the image has already the requested size
+        if (scale == 1 and ratio == 1)
+        {
+            square_image = image;
+            return {1, point(0, 0)};
+        }
+
+        // black background
+        square_image.set_size(size, size);
+        assign_all_pixels(square_image, dlib::rgb_pixel(0, 0, 0));
+
+        // resize the image so that it fits into a size x size image
+        auto temp = image;
+        resize_image(scale, temp);
+
+        // get the row and column offsets (the padding size)
+        point offset((size - temp.nc()) / 2, (size - temp.nr()) / 2);
+        for (long r = 0; r < temp.nr(); r++)
+        {
+            for (long c = 0; c < temp.nc(); c++)
+            {
+                square_image(offset.y() + r, offset.x() + c) = temp(r, c);
+            }
+        }
+
+        return {scale, offset};
+    }
+
+    inline double sigmoid(double val)
+    {
+        return 1.0 / (1.0 + std::exp(-val));
+    }
+
     struct yolo_options
     {
         // the YOLO ground truth map, where each index corresponds to:
@@ -51,53 +103,6 @@ namespace dlib
         std::string get_label(const size_t idx) const { return labels[idx]; }
 
         const std::vector<std::string>& get_labels() const { return labels; }
-
-        // Resize the input image to a square image and zero-pad the shortest dimension
-        std::pair<double, point> scale_aspect_ratio(
-            const matrix<rgb_pixel>& image,
-            const int size,
-            matrix<rgb_pixel>& square_image
-        )
-        {
-            // figure out if we have to verticallt or horizontally scale the image
-            double ratio = static_cast<double>(image.nr()) / image.nc();
-            double scale = 1.0;
-            if (ratio > 1)
-            {
-                scale = static_cast<double>(size) / image.nr();
-            }
-            else
-            {
-                scale = static_cast<double>(size) / image.nc();
-            }
-
-            // early return if the image has already the requested size
-            if (scale == 1 and ratio == 1)
-            {
-                square_image = image;
-                return {1, point(0, 0)};
-            }
-
-            // black background
-            square_image.set_size(size, size);
-            assign_all_pixels(square_image, dlib::rgb_pixel(0, 0, 0));
-
-            // resize the image so that it fits into a size x size image
-            auto temp = image;
-            resize_image(scale, temp);
-
-            // get the row and column offsets (the padding size)
-            point offset((size - temp.nc()) / 2, (size - temp.nr()) / 2);
-            for (long r = 0; r < temp.nr(); r++)
-            {
-                for (long c = 0; c < temp.nc(); c++)
-                {
-                    square_image(offset.y() + r, offset.x() + c) = temp(r, c);
-                }
-            }
-
-            return {scale, offset};
-        }
 
         // generates a YOLO truth map from an image and its set of bounding boxes
         std::pair<matrix<rgb_pixel>, map_type> generate_map
@@ -244,6 +249,8 @@ namespace dlib
         DLIB_CASSERT(item.input_size % item.downsampling_factor == 0, "input_size is not a multiple of downsampling_factor");
     }
 
+    bool operator<(const mmod_rect& a, const mmod_rect& b) { return a.detection_confidence < b.detection_confidence; }
+
     class loss_yolo_
     {
     public:
@@ -286,10 +293,10 @@ namespace dlib
                         const float objectness = out_data[tensor_index(output_tensor, i, 0, r, c)];
                         if (objectness > adjust_threshold)
                         {
-                            const float offset_x = out_data[tensor_index(output_tensor, i, 1, r, c)];
-                            const float offset_y = out_data[tensor_index(output_tensor, i, 2, r, c)];
-                            const float height = out_data[tensor_index(output_tensor, i, 3, r, c)];
-                            const float width = out_data[tensor_index(output_tensor, i, 4, r, c)];
+                            const float offset_x = sigmoid(out_data[tensor_index(output_tensor, i, 1, r, c)]);
+                            const float offset_y = sigmoid(out_data[tensor_index(output_tensor, i, 2, r, c)]);
+                            const float height = sigmoid(out_data[tensor_index(output_tensor, i, 3, r, c)]);
+                            const float width = sigmoid(out_data[tensor_index(output_tensor, i, 4, r, c)]);
                             float max_value = out_data[tensor_index(output_tensor, i, 5, r, c)];
                             size_t label_idx = 0;
                             for (long k = 6; k < output_tensor.k(); ++k)
@@ -302,21 +309,22 @@ namespace dlib
                                 }
                             }
                             mmod_rect rect;
+                            std::cout << "offset_x: " << offset_x << '\n';
+                            std::cout << "offset_y: " << offset_y << '\n';
+                            std::cout << "height: " << height << '\n';
+                            std::cout << "width: " << width << '\n';
                             rect.detection_confidence = objectness;
                             rect.label = options.get_label(label_idx);
                             const double df = options.get_downsampling_factor();
-                            const auto center = dpoint(offset_x * df + c, offset_y * df + r);
-                            rect.rect = rectangle(std::round(center.x() - width / 2 * df),
-                                                  std::round(center.y() - height / 2 * df),
-                                                  std::round(center.x() + width / 2 * df),
-                                                  std::round(center.y() + height / 2 * df));
-                            iter->push_back(rect);
+                            const auto center = dpoint((c + offset_x) * df, (r + offset_y) * df);
+                            rect.rect = centered_rect(center, width * df, height * df);
                             candidates.push_back(rect);
                         }
                     }
                 }
+                std::sort(candidates.rbegin(), candidates.rend());
                 // TODO: perform NMS
-                // iter->push_back(...);
+                *iter++ = std::move(candidates);
             }
         }
 
