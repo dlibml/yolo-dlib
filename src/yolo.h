@@ -429,7 +429,6 @@ namespace dlib
                 {
                     for (long c = 0; c < output_tensor.nc(); ++c)
                     {
-
                         // objectness classifier (loss binary log per pixel)
                         float y = (*truth)[0](r, c);
                         const size_t idx = tensor_index(output_tensor, i, 0, r, c);
@@ -463,11 +462,16 @@ namespace dlib
                             }
                             else
                             {
-                                const float temp1 = y - std::sqrt(temp_bbr_data[bbr_idx]);
+                                float temp1;
+                                if (k < 3) // center offset
+                                    temp1 = y - temp_bbr_data[bbr_idx];
+                                else // height and width
+                                    temp1 = y - std::sqrt(temp_bbr_data[bbr_idx]);
                                 const float temp2 = temp1 * scale * lambda_coord;
                                 loss_bbr += temp1 * temp2;
                                 g[idx] = -temp2;
-                            }                        }
+                            }
+                        }
 
                         // category classifier (loss multiclass log per pixel)
                         y = (*truth)[5](r, c);
