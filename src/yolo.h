@@ -13,7 +13,7 @@ namespace dlib
     )
     {
         // figure out if we have to verticallt or horizontally scale the image
-        double ratio = static_cast<double>(image.nr()) / image.nc();
+        const double ratio = static_cast<double>(image.nr()) / image.nc();
         double scale = 1.0;
         if (ratio > 1)
         {
@@ -40,7 +40,7 @@ namespace dlib
         resize_image(scale, temp);
 
         // get the row and column offsets (the padding size)
-        point offset((size - temp.nc()) / 2, (size - temp.nr()) / 2);
+        const point offset((size - temp.nc()) / 2, (size - temp.nr()) / 2);
         for (long r = 0; r < temp.nr(); r++)
         {
             for (long c = 0; c < temp.nc(); c++)
@@ -269,7 +269,7 @@ namespace dlib
             typename SUB_TYPE,
             typename label_iterator
             >
-        void to_label(
+        void to_label (
             const tensor& input_tensor,
             const SUB_TYPE& sub,
             label_iterator iter,
@@ -360,8 +360,8 @@ namespace dlib
                              "output size = " << output_tensor.nr() << " x " << output_tensor.nc());
             }
 
-            const float* const out_data = output_tensor.host();
-            float* g = grad.host();
+            const float* out_data = output_tensor.host();
+            float* g = grad.host_write_only();
 
             // The loss we output is the average loss of over the minibatch and also over each objectness element
             const double scale = 1.0 / (output_tensor.num_samples() * output_tensor.nr() * output_tensor.nc());
@@ -413,14 +413,13 @@ namespace dlib
 
             resizable_tensor temp_obj_tensor(obj_tensor.num_samples(), obj_tensor.k(), obj_tensor.nr(), obj_tensor.nc());
             tt::sigmoid(temp_obj_tensor, obj_tensor);
-            float* temp_obj_data = temp_obj_tensor.host();
-
             resizable_tensor temp_bbr_tensor(bbr_tensor.num_samples(), bbr_tensor.k(), bbr_tensor.nr(), bbr_tensor.nc());
             tt::sigmoid(temp_bbr_tensor, bbr_tensor);
-            float* temp_bbr_data = temp_bbr_tensor.host();
-
             resizable_tensor temp_cls_tensor(cls_tensor.num_samples(), cls_tensor.k(), cls_tensor.nr(), cls_tensor.nc());
             tt::softmax(temp_cls_tensor, cls_tensor);
+
+            float* temp_obj_data = temp_obj_tensor.host();
+            float* temp_bbr_data = temp_bbr_tensor.host();
             float* temp_cls_data = temp_cls_tensor.host();
 
             for (long i = 0; i < output_tensor.num_samples(); ++i)
