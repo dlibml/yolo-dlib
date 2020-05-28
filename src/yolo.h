@@ -523,7 +523,7 @@ namespace dlib
         friend std::ostream& operator<<(std::ostream& out, const loss_yolo_& item)
         {
             out << "loss_yolo\t (";
-            auto& opts = item.options;
+            const auto& opts = item.options;
             out << "input_size: " << opts.get_input_size();
             out << ", downsampling_factor: " << opts.get_downsampling_factor();
             out << ", grid_size: " << opts.get_grid_size();
