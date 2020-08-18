@@ -53,6 +53,7 @@ namespace dlib
     }
 
     inline double sigmoid(const double val) { return 1.0 / (1.0 + std::exp(-val)); }
+    inline double logit(const double val) { return std::log(val) - std::log(1 - val); }
 
     struct yolo_options
     {
