@@ -69,12 +69,12 @@ namespace dlib
         yolo_options() = default;
 
         yolo_options(
-            const long input_size_,
-            const long downsampling_factor_,
+            const long input_size,
+            const long downsampling_factor,
             const std::vector<std::vector<mmod_rect>>& boxes
         ) :
-            input_size(input_size_),
-            downsampling_factor(downsampling_factor_)
+            input_size(input_size),
+            downsampling_factor(downsampling_factor)
         {
             DLIB_CASSERT(input_size % downsampling_factor == 0, "input_size is not a multiple of downsampling_factor");
             std::set<std::string> labels_set;
@@ -377,15 +377,15 @@ namespace dlib
                         for (long c = 0; c < output_tensor.nc(); ++c)
                         {
                             const size_t idx = tensor_index(output_tensor, i, k, r, c);
-                            if (k == 0)
+                            if (k == 0)  // objectness
                             {
                                 obj_data[obj_idx++] = out_data[idx];
                             }
-                            else if (k < 5)
+                            else if (k < 5)  // coordinates
                             {
                                 bbr_data[bbr_idx++] = out_data[idx];
                             }
-                            else
+                            else  // classifier
                             {
                                 cls_data[cls_idx++] = out_data[idx];
                             }
@@ -446,7 +446,7 @@ namespace dlib
                             const float y = (*truth)[k](r, c);
                             const size_t idx = tensor_index(output_tensor, i, k, r, c);
                             bbr_idx = tensor_index(bbr_tensor, i, k - 1, r, c);
-                            if (obj <= 0)
+                            if (obj <= 0)  // don't care about grids with no objects
                             {
                                 g[idx] = 0.f;
                             }
@@ -469,7 +469,7 @@ namespace dlib
                         for (long k = 5; k < output_tensor.k(); ++k)
                         {
                             const size_t idx = tensor_index(output_tensor, i, k, r, c);
-                            if (obj <= 0)
+                            if (obj <= 0)  // don't care about grids with no objects
                             {
                                 g[idx] = 0.f;
                             }
