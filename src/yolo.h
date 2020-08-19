@@ -325,7 +325,7 @@ namespace dlib
             >
         double compute_loss_value_and_gradient (
             const tensor& input_tensor,
-            const const_label_iterator truth,
+            const_label_iterator truth,
             SUBNET& sub
         ) const
         {
