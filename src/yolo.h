@@ -271,6 +271,10 @@ namespace dlib
             DLIB_CASSERT(sub.sample_expansion_factor() == 1, "expansion factor should be 1");
             DLIB_CASSERT(output_tensor.k() >= 6, "YOLO layer requires at least 6 channels");
             DLIB_CASSERT(input_tensor.num_samples() == output_tensor.num_samples(), "num_samples mismatch");
+            DLIB_CASSERT(static_cast<double>(input_tensor.nr()) / output_tensor.nr() == options.get_downsampling_factor(),
+                         "wrong x downsampling factor");
+            DLIB_CASSERT(static_cast<double>(input_tensor.nc()) / output_tensor.nc() == options.get_downsampling_factor(),
+                         "wrong y downsampling factor");
 
             const float* const out_data = output_tensor.host();
 
@@ -335,6 +339,10 @@ namespace dlib
             DLIB_CASSERT(sub.sample_expansion_factor() == 1, "expansion factor should be 1");
             DLIB_CASSERT(input_tensor.num_samples() != 0, "we need at least 1 training sample");
             DLIB_CASSERT(input_tensor.num_samples() == grad.num_samples(), "num_samples mismatch");
+            DLIB_CASSERT(static_cast<double>(input_tensor.nr()) / output_tensor.nr() == options.get_downsampling_factor(),
+                         "wrong x downsampling factor");
+            DLIB_CASSERT(static_cast<double>(input_tensor.nc()) / output_tensor.nc() == options.get_downsampling_factor(),
+                         "wrong y downsampling factor");
             DLIB_CASSERT(output_tensor.k() >= 6, "YOLO layer requires at least 6 channels");
             DLIB_CASSERT(output_tensor.nr() == options.get_grid_size(), "wrong output nr: " << output_tensor.nr());
             DLIB_CASSERT(output_tensor.nc() == options.get_grid_size(), "wrong output nc: " << output_tensor.nc());
