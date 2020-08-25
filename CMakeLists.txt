@@ -67,4 +67,5 @@ macro(add_dlib_executable name)
 endmacro()
 
 add_dlib_executable(main)
+add_dlib_executable(bench)
 # add_dlib_executable(resnet50_backbone)
