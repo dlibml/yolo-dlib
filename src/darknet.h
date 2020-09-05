@@ -10,21 +10,15 @@ template <typename activation_type>
 class visitor_setup_activations
 {
     public:
-    visitor_setup_activations(const float& alpha) { act = activation_type(alpha); }
+    visitor_setup_activations(const float& alpha) : act(activation_type(alpha)) { }
 
-    template <typename T> void setup(T&) const {}
+    template <typename input_layer_type>
+    void operator()(size_t, input_layer_type&) const { }
 
-    template <typename U, typename E> void setup(dlib::add_layer<activation_type, U, E>& l) const
+    template <typename U, typename E>
+    void operator()(size_t, dlib::add_layer<activation_type, U, E>& l)
     {
         l.layer_details() = act;
-    }
-
-    template <typename input_layer_type> void operator()(size_t, input_layer_type&) const {}
-
-    template <typename T, typename U, typename E>
-    void operator()(size_t, dlib::add_layer<T, U, E>& l)
-    {
-        setup(l);
     }
 
     private:
