@@ -5,6 +5,30 @@
 
 #include <dlib/dnn.h>
 
+class visitor_setup_leaky_relu
+{
+    public:
+    visitor_setup_leaky_relu(const float& alpha) { act = dlib::leaky_relu_(alpha); }
+
+    template <typename T> void setup(T&) const {}
+
+    template <typename U, typename E> void setup(dlib::add_layer<dlib::leaky_relu_, U, E>& l) const
+    {
+        l.layer_details() = act;
+    }
+
+    template <typename input_layer_type> void operator()(size_t, input_layer_type&) const {}
+
+    template <typename T, typename U, typename E>
+    void operator()(size_t, dlib::add_layer<T, U, E>& l)
+    {
+        setup(l);
+    }
+
+    private:
+    dlib::leaky_relu_ act;
+};
+
 namespace darknet
 {
     // clang-format off
@@ -92,10 +116,10 @@ namespace darknet
             backbone53<input_rgb_image>>>;
     };
 
-    using classifier19_train = def<bn_con, mish>::classifier19_type;
-    using classifier19_infer = def<affine, mish>::classifier19_type;
-    using detector19_train = def<bn_con, mish>::detector19_type;
-    using detector19_infer = def<affine, mish>::detector19_type;
+    using classifier19_train = def<bn_con, leaky_relu>::classifier19_type;
+    using classifier19_infer = def<affine, leaky_relu>::classifier19_type;
+    using detector19_train = def<bn_con, leaky_relu>::detector19_type;
+    using detector19_infer = def<affine, leaky_relu>::detector19_type;
 
     using classifier53_train = def<bn_con, mish>::classifier53_type;
     using classifier53_infer = def<affine, mish>::classifier53_type;

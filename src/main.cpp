@@ -44,8 +44,7 @@ try
             darknet::detector19_infer temp;
             auto trainer = dlib::dnn_trainer(temp);
             trainer.set_synchronization_file("yolo_darknet19_sync");
-            temp = trainer.get_net(dlib::force_flush_to_disk::no);
-            net = temp;
+            net = trainer.get_net(dlib::force_flush_to_disk::no);
         }
 
         // dlib::deserialize("./yolo-resnet50-backbone.dnn") >> net;
@@ -80,12 +79,14 @@ try
         std::vector<dlib::matrix<dlib::rgb_pixel>> images;
         std::vector<std::vector<dlib::mmod_rect>> bboxes;
         // dlib::load_image_dataset(images, bboxes, "./pascal.xml");
-        dlib::load_image_dataset(images, bboxes, "./sunglasses.xml");
+        dlib::load_image_dataset(images, bboxes, "./horseracing.xml");
         std::cout << "image dataset loaded: " << images.size() << " images\n";
 
         const long input_size = 448;
         dlib::yolo_options options(input_size, 32, bboxes);
         darknet::detector19_train net(options);
+        dlib::set_all_bn_inputs_no_bias(net);
+        dlib::visit_layers(net, visitor_setup_leaky_relu(0.1));
         net.subnet().layer_details().set_num_filters(options.get_labels().size() + 5);
         // dlib::deserialize("resnet50_pretrained_backbone.dnn") >> net.subnet().subnet();
         // dlib::set_all_learning_rate_multipliers(net.subnet().subnet(), 0.01);
@@ -162,12 +163,12 @@ try
         trainer.be_verbose();
         trainer.set_learning_rate(0.1);
         trainer.set_iterations_without_progress_threshold(3000);
-        trainer.set_mini_batch_size(8);
+        trainer.set_mini_batch_size(32);
         trainer.set_synchronization_file("yolo_darknet19_sync", std::chrono::minutes(10));
         std::cout << trainer << '\n';
         std::vector<dlib::matrix<dlib::rgb_pixel>> minibatch_images;
         std::vector<dlib::yolo_options::map_type> minibatch_labels;
-        while (trainer.get_learning_rate() > 1e-6)
+        while (trainer.get_learning_rate() > 1e-5)
         {
             minibatch_images.clear();
             minibatch_labels.clear();
