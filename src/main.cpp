@@ -86,7 +86,10 @@ try
         dlib::yolo_options options(input_size, 32, bboxes);
         darknet::detector19_train net(options);
         dlib::set_all_bn_inputs_no_bias(net);
-        dlib::visit_layers(net, visitor_setup_activations<dlib::leaky_relu_>(0.1));
+        dlib::visit_computational_layers(net, [](dlib::leaky_relu_& l) {
+            l = dlib::leaky_relu_(0.2);
+        });
+
         net.subnet().layer_details().set_num_filters(options.get_labels().size() + 5);
         // dlib::deserialize("resnet50_pretrained_backbone.dnn") >> net.subnet().subnet();
         // dlib::set_all_learning_rate_multipliers(net.subnet().subnet(), 0.01);

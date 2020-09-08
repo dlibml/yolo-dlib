@@ -5,26 +5,6 @@
 
 #include <dlib/dnn.h>
 
-// A visitor to setup activation layers that take 1 parameter, such as leaky_relu_ and prelu_
-template <typename activation_type>
-class visitor_setup_activations
-{
-    public:
-    visitor_setup_activations(const float& alpha) : act(activation_type(alpha)) { }
-
-    template <typename input_layer_type>
-    void operator()(size_t, input_layer_type&) const { }
-
-    template <typename U, typename E>
-    void operator()(size_t, dlib::add_layer<activation_type, U, E>& l)
-    {
-        l.layer_details() = act;
-    }
-
-    private:
-    activation_type act;
-};
-
 namespace darknet
 {
     // clang-format off
