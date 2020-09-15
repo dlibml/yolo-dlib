@@ -120,8 +120,7 @@ namespace dlib
             for (size_t i = 0; i < boxes.size(); ++i)
             {
                 // adjust the bounding box
-                const auto temp = scale_rect(boxes[i].rect, scale);
-                const auto bbox = translate_rect(temp, offset);
+                const auto bbox = translate_rect(scale_rect(boxes[i].rect, scale), offset);
                 const rectangle image_rect(0, 0, input_size - 1, input_size - 1);
                 // the center of the adjusted bounding box annotation
                 const auto oc = center(bbox);
@@ -149,8 +148,8 @@ namespace dlib
                         label_map[1](r, c) = offset_x;
                         DLIB_CASSERT(0 <= offset_y && offset_y <= 1, "wrong offset_y: " << offset_y);
                         label_map[2](r, c) = offset_y;
-                        label_map[3](r, c) = std::sqrt(height > 1 ? 1 : height);
-                        label_map[4](r, c) = std::sqrt(width > 1 ? 1 : width);
+                        label_map[3](r, c) = std::sqrt(put_in_range(0, 1, height));
+                        label_map[4](r, c) = std::sqrt(put_in_range(0, 1, width));
                         label_map[5](r, c) = idx;
                     }
                 }

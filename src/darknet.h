@@ -5,6 +5,30 @@
 
 #include <dlib/dnn.h>
 
+class visitor_count_convolutions
+{
+    public:
+    visitor_count_convolutions(size_t& num_convolutions) : num_convolutions(num_convolutions) {}
+
+    template <typename other_layer_type> void operator()(size_t, other_layer_type&) const {}
+
+    template <long nf, long nr, long nc, int sy, int sx, int py, int px>
+    void operator()(size_t, dlib::con_<nf, nr, nc, sy, sx, py, px>&)
+    {
+        ++num_convolutions;
+    }
+
+    private:
+    size_t& num_convolutions;
+};
+
+template <typename net_type> size_t count_convolutions(net_type& net)
+{
+    size_t num_convolutions = 0;
+    dlib::visit_computational_layers(net, visitor_count_convolutions(num_convolutions));
+    return num_convolutions;
+}
+
 namespace darknet
 {
     // clang-format off

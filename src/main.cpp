@@ -99,6 +99,7 @@ try
         }
         std::cout << net << '\n';
         std::cout << "num parameters: " << dlib::count_parameters(net) << '\n';
+        std::cout << "num convolutions: " << count_convolutions(net) << '\n';
         dlib::pipe<training_sample> training_data(1000);
 
 #ifdef VISUAL
@@ -142,8 +143,8 @@ try
                 win.set_image(sample.image);
                 for (const auto& box : bboxes[idx])
                 {
-                    const auto s_rect = dlib::scale_rect(box.rect, scale);
-                    sample.boxes.push_back(dlib::translate_rect(s_rect, offset));
+                    sample.boxes.push_back(
+                        dlib::translate_rect(dlib::scale_rect(box.rect, scale), offset));
                     win.add_overlay(sample.boxes.back(), dlib::rgb_pixel(0, 255, 0), box.label);
                 }
                 std::cin.get();
