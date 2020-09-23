@@ -363,8 +363,10 @@ namespace dlib
 
             // The loss we output is the average loss of over the minibatch and also over each objectness element
             const double scale = 1.0 / (output_tensor.num_samples() * output_tensor.nr() * output_tensor.nc());
-            const double lambda_noobj = 0.5;
-            const double lambda_coord = 5.0;
+            const double scale_noobj = 0.5;
+            const double scale_coord = 5.0;
+            const double scale_class = 1.0;
+            const double scale_objct = 1.0;
 
             // extract the subtensors from the output tensor
             resizable_tensor obj_tensor(output_tensor.num_samples(), 1, output_tensor.nr(), output_tensor.nc());
@@ -433,14 +435,14 @@ namespace dlib
                         if (obj > 0.f)
                         {
                             const float temp = log1pexp(-out_data[idx]);
-                            loss_obj += obj * scale * temp;
-                            g[idx] = obj * scale * (temp_obj_data[obj_idx] - 1);
+                            loss_obj += obj * scale * temp * scale_objct;
+                            g[idx] = obj * scale * (temp_obj_data[obj_idx] - 1) * scale_objct;
                         }
                         else if (obj < 0.f)
                         {
                             const float temp = -(-out_data[idx] - log1pexp(-out_data[idx]));
-                            loss_obj += -obj * temp * scale * lambda_noobj;
-                            g[idx] = -obj * temp_obj_data[obj_idx] * scale * lambda_noobj;
+                            loss_obj += -obj * temp * scale * scale_noobj;
+                            g[idx] = -obj * temp_obj_data[obj_idx] * scale * scale_noobj;
                         }
                         else
                         {
@@ -464,7 +466,7 @@ namespace dlib
                                     temp1 = y - temp_bbr_data[bbr_idx];
                                 else  // height and width
                                     temp1 = y - std::sqrt(temp_bbr_data[bbr_idx]);
-                                const float temp2 = temp1 * scale * lambda_coord;
+                                const float temp2 = temp1 * scale * scale_coord;
                                 loss_bbr += temp1 * temp2;
                                 g[idx] = -temp2;
                             }
@@ -485,12 +487,12 @@ namespace dlib
                                 cls_idx = tensor_index(cls_tensor, i, k - 5, r, c);
                                 if (k - 5 == y)
                                 {
-                                    loss_cls += -safe_log(temp_cls_data[cls_idx]) * scale;
-                                    g[idx] = scale * (temp_cls_data[cls_idx] - 1);
+                                    loss_cls += -safe_log(temp_cls_data[cls_idx]) * scale * scale_class; 
+                                    g[idx] = scale * (temp_cls_data[cls_idx] - 1) * scale_class;
                                 }
                                 else
                                 {
-                                    g[idx] = scale * temp_cls_data[cls_idx];
+                                    g[idx] = scale * temp_cls_data[cls_idx] * scale_class;
                                 }
                             }
                         }
