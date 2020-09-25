@@ -99,21 +99,16 @@ namespace darknet
             convolutional<32, 3, 1, 1,
             INPUT>>>>>>>>>>>;
 
-        using classifier19_type = loss_multiclass_log<
-            con<1000, 1, 1, 1, 1, avg_pool_everything<
-            backbone19<input_rgb_image>>>>;
+        template <typename SUBNET>
+        using classification_head = loss_multiclass_log<fc<1000, avg_pool_everything<SUBNET>>>;
 
-        using classifier53_type = loss_multiclass_log<
-            con<1000, 1, 1, 1, 1, avg_pool_everything<
-            backbone53<input_rgb_image>>>>;
+        template <typename SUBNET>
+        using detection_head = loss_yolo<con<1, 1, 1, 1, 1, SUBNET>>;
 
-        using detector19_type = loss_yolo<
-            con<1, 1, 1, 1, 1,
-            backbone19<input_rgb_image>>>;
-
-        using detector53_type = loss_yolo<
-            con<1, 1, 1, 1, 1,
-            backbone53<input_rgb_image>>>;
+        using classifier19_type = classification_head<backbone19<input_rgb_image>>;
+        using classifier53_type = classification_head<backbone53<input_rgb_image>>;
+        using detector19_type = detection_head<backbone19<input_rgb_image>>;
+        using detector53_type = detection_head<backbone53<input_rgb_image>>;
     };
 
     using classifier19_train = def<bn_con, leaky_relu>::classifier19_type;
