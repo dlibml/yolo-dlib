@@ -1,28 +1,12 @@
 #include "darknet.h"
 #include "yolo.h"
-// #include "resnet_backbone.h"
 
 #include <dlib/data_io.h>
 #include <iostream>
-#include <resnet.h>
 
 #undef VISUAL
 
 #include <dlib/gui_widgets.h>
-
-// namespace detector
-// {
-//     using namespace dlib;
-//     template <template <typename> class BN, template <typename> class ACT>
-//     using net_type = loss_yolo<
-//         con<1, 1, 1, 1, 1,
-//         typename resnet_backbone::def<BN, ACT>::template backbone_50<
-//         input_rgb_image
-//     >>>;
-
-//     using train = net_type<bn_con, mish>;
-//     using infer = net_type<affine, mish>;
-// }
 
 struct training_sample
 {
@@ -37,8 +21,6 @@ try
     if (argc > 1)
     {
         dlib::image_window win;
-        // detector::train net;
-        // darknet::train net;
         darknet::detector19_infer net;
         {
             darknet::detector19_infer temp;
@@ -47,8 +29,6 @@ try
             net = trainer.get_net(dlib::force_flush_to_disk::no);
         }
 
-        // dlib::deserialize("./yolo-resnet50-backbone.dnn") >> net;
-        // dlib::deserialize("./yolo-darknet53-backbone.dnn") >> net;
         std::cout << net << '\n';
         dlib::matrix<dlib::rgb_pixel> image, input_image;
         for (int i = 1; i < argc; ++i)
@@ -78,8 +58,7 @@ try
     {
         std::vector<dlib::matrix<dlib::rgb_pixel>> images;
         std::vector<std::vector<dlib::mmod_rect>> bboxes;
-        // dlib::load_image_dataset(images, bboxes, "./pascal.xml");
-        dlib::load_image_dataset(images, bboxes, "./horseracing.xml");
+        dlib::load_image_dataset(images, bboxes, "./pascal.xml");
         std::cout << "image dataset loaded: " << images.size() << " images\n";
 
         const long input_size = 448;
@@ -91,8 +70,6 @@ try
         });
 
         net.subnet().layer_details().set_num_filters(options.get_labels().size() + 5);
-        // dlib::deserialize("resnet50_pretrained_backbone.dnn") >> net.subnet().subnet();
-        // dlib::set_all_learning_rate_multipliers(net.subnet().subnet(), 0.01);
         {
             dlib::matrix<dlib::rgb_pixel> dummy(input_size, input_size);
             net(dummy);
